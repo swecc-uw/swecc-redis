@@ -36,6 +36,5 @@ jobs:
           docker run -d \
             --name swecc-redis-instance \
             --network swag-network \
-            -p 6379:6379 \
             --restart unless-stopped \
             ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
