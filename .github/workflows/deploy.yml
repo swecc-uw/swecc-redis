@@ -1,40 +1,53 @@
-name: Push-to-EC2
+name: Deploy Redis Service
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
+
 jobs:
-  build:
+  push_to_dockerhub:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v1
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:${{ github.sha }}
+
+  deploy_to_swarm:
     runs-on:
       group: EC2
       labels: [self-hosted, deploy]
+
+    needs: push_to_dockerhub
+
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v2
+    - name: Checkout Repository
+      uses: actions/checkout@v2
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v1
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_SWECC_REDIS_TOKEN }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:${{ github.sha }}
-      - name: Deploy
-        run: |
-          docker stop swecc-redis-instance || true
-          docker rm swecc-redis-instance || true
+    - name: Deploy Redis service
+      run: |
+        docker service rm redis || true
 
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
-
-          docker run -d \
-            --name swecc-redis-instance \
-            --network swag-network \
-            --restart unless-stopped \
-            ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
+        docker service create \
+          --name redis \
+          --network prod_swecc-network \
+          --mount type=volume,source=redis_data,target=/data \
+          --replicas 1 \
+          --restart-condition any \
+          ${{ secrets.DOCKERHUB_USERNAME }}/swecc-redis:latest
